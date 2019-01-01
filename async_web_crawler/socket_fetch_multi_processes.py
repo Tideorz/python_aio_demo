@@ -38,6 +38,9 @@ class WebCrawler(object):
 
     def parse_response(self, response, current_link):
         self.links_visited.append(current_link)
+        # remove url for links_to_visit
+        if current_link in self.links_to_visit:
+            self.links_to_visit.remove(current_link)
         for url in re.findall('<a href="([^"]+)">', str(response)):
             if url[0] == '/':
                 url = current_link + url
@@ -68,5 +71,5 @@ class WebCrawler(object):
 
 if __name__ == '__main__':
     link = 'http://www.baidu.com'
-    wc = WebCrawler(link, 10, 5)
+    wc = WebCrawler(link, 30, 5)
     wc.web_crawler() 
