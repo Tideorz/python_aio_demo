@@ -43,7 +43,7 @@ class Fetcher(object):
 
     def read_response_callback(self, event_key, event_mask):
         # get response, set chunk buffer as 4KB
-        chunk = self.sock.recv(4096)
+        chunk = self.sock.recv(4096)    
         if chunk:
             self.response += chunk
         else: 
