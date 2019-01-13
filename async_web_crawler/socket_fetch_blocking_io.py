@@ -54,5 +54,5 @@ class WebCrawler(object):
 
 if __name__ == '__main__':
     link = 'http://www.baidu.com'
-    wc = WebCrawler(link, 10)
+    wc = WebCrawler(link, 30)
     wc.web_crawler() 
