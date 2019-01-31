@@ -15,24 +15,29 @@ selector = DefaultSelector() # Linux system will use epoll()
 class GenExecutor():
     def __init__(self, gen):
         self.gen = gen
-        self.step()
+        f = Future()
+        f.set_result(None)
+        self.step(f)
 
-    def step(self):
+    def step(self, future):
         try:
-            f = next(self.gen)
+            f = self.gen.send(future.result)
         except StopIteration:
             return
         f.add_done_callback(self.step)
 
 class Future():
     def __init__(self):
-        self.callback = None
+        self.result = None
+        self._callback = [] 
 
-    def set_result(self):
-        self.callback() 
+    def set_result(self, result):
+        self.result = result
+        for func in self._callback: 
+            func(self)
 
     def add_done_callback(self, func):
-        self.callback = func 
+        self._callback.append(func)
 
 
 class Fetcher(object):
@@ -57,7 +62,7 @@ class Fetcher(object):
         f = Future() 
 
         def connect_callback():
-            f.set_result() 
+            f.set_result(None) 
         selector.register(self.sock.fileno(), EVENT_WRITE, connect_callback)
 
         yield f 
@@ -72,10 +77,9 @@ class Fetcher(object):
         while True:
             f = Future()
             def read_response_callback():
-                f.set_result()
+                f.set_result(self.sock.recv(4096))
             selector.register(self.sock.fileno(), EVENT_READ, read_response_callback)
-            yield f
-            chunk = self.sock.recv(4096)    
+            chunk = yield f    
             selector.unregister(self.sock.fileno())  # Done reading.
             if chunk:
                 self.response += chunk
