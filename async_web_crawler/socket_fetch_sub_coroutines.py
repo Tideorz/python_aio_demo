@@ -12,6 +12,38 @@ except ImportError:
 selector = DefaultSelector() # Linux system will use epoll()
 
 
+class Task():
+    def __init__(self, gen):
+        self.gen = gen
+        f = Future()
+        f.set_result(None)
+        self.step(f)
+
+    def step(self, future):
+        try:
+            f = self.gen.send(future.result)
+        except StopIteration:
+            return
+        f.add_done_callback(self.step)
+
+class Future():
+    def __init__(self):
+        self.result = None
+        self._callback = [] 
+
+    def __iter__(self):
+        yield self
+        return self.result
+
+    def set_result(self, result):
+        self.result = result
+        for func in self._callback: 
+            func(self)
+
+    def add_done_callback(self, func):
+        self._callback.append(func)
+
+
 class Fetcher(object):
     def __init__(self, url, web_crawler):
         self.url = url
@@ -21,17 +53,41 @@ class Fetcher(object):
         self.sock.setblocking(False)
         self.web_crawler = web_crawler
 
-        self.gen = None
+    def send(self):
+        f = Future() 
+        def connect_callback():
+            f.set_result(None) 
+        # bind socket with EVENT_WRITE, means we're checking
+        # when the socket is writable
+        selector.register(self.sock.fileno(), EVENT_WRITE, connect_callback)
+        yield from f 
 
-    def init_gen(self, gen):
-        self.gen = gen
+    def read(self):
+        f = Future()
+        def read_response_callback():
+            f.set_result(self.sock.recv(4096))
+        selector.register(self.sock.fileno(), EVENT_READ, read_response_callback)
+        chunk = yield from f
+        selector.unregister(self.sock.fileno())  # Done reading.
+        return chunk
 
-    def next_gen(self):
-        try:
-            next(self.gen)
-        except StopIteration:
-            return
-
+    def read_all(self):
+        selector.unregister(self.sock.fileno()) # Done connecting
+        # send GET request
+        request = 'GET {0} HTTP/1.0\r\nHost: {1}\r\n\r\n'.format(self.url, self.hostname)
+        request = bytearray(request, 'utf8')
+        self.sock.send(request)
+    
+        # get response, set chunk buffer as 4KB
+        while True:
+            chunk = yield from self.read()                
+            if chunk:
+                self.response += chunk
+            else: 
+                # parse respones 
+                self.parse_response()
+                break
+        
     def connect(self):
         # parse url
         parse_result = urlparse(self.url)
@@ -40,40 +96,15 @@ class Fetcher(object):
             self.sock.connect((self.hostname, 80))
         except BlockingIOError:
             pass
-        # bind socket with EVENT_WRITE, means we're checking
-        # when the socket is writable
-        def connect_callback():
-            self.next_gen() 
-        selector.register(self.sock.fileno(), EVENT_WRITE, connect_callback)
-
-        yield 1
-
-        selector.unregister(self.sock.fileno()) # Done connecting
-        # send GET request
-        request = 'GET {0} HTTP/1.0\r\nHost: {1}\r\n\r\n'.format(self.url, self.hostname)
-        request = bytearray(request, 'utf8')
-        self.sock.send(request)  
-
-        def read_response_callback():
-            self.next_gen()
-        selector.register(self.sock.fileno(), EVENT_READ, read_response_callback)
-        while True:
-            # get response, set chunk buffer as 4KB
-            yield 2
-            chunk = self.sock.recv(4096)    
-            if chunk:
-                self.response += chunk
-            else: 
-                # parse respones 
-                selector.unregister(self.sock.fileno())  # Done reading.
-                self.parse_response()
-                break
-
+        yield from self.send()
+        yield from self.read_all()
+       
     def parse_response(self):
         self.web_crawler.links_visited.append(self.url)
         # remove url for links_to_visit
         if self.url in self.web_crawler.links_to_visit:
             self.web_crawler.links_to_visit.remove(self.url)
+        import pdb; pdb.set_trace()
         for url in re.findall('<a href="([^"]+)">', str(self.response)):
             if url[0] == '/':
                 url = self.url + url
@@ -90,8 +121,7 @@ class Fetcher(object):
                     new_url = self.web_crawler.links_to_visit.pop()
                     fetcher = Fetcher(new_url, self.web_crawler)
                     gen = fetcher.connect()
-                    fetcher.init_gen(gen)
-                    fetcher.next_gen()
+                    Task(gen)
                 except IndexError:
                     break
         else:
@@ -109,8 +139,7 @@ class WebCrawler(object):
         # connect to the initial url, and start event loop
         fetcher = Fetcher(self.url, self)
         gen = fetcher.connect()
-        fetcher.init_gen(gen)
-        fetcher.next_gen()
+        Task(gen)
         while True:
             if self.stop_event_loop:
                 break

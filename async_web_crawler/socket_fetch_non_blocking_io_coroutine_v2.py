@@ -12,7 +12,7 @@ except ImportError:
 selector = DefaultSelector() # Linux system will use epoll()
 
 
-class GenExecutor():
+class Task():
     def __init__(self, gen):
         self.gen = gen
         self.step()
@@ -47,7 +47,7 @@ class Fetcher(object):
     def connect(self):
         # parse url
         parse_result = urlparse(self.url)
-        self.hostname = parse_result.netloc
+        self.hostname = parse_result.netloc.split(':')[0]
         try:
             self.sock.connect((self.hostname, 80))
         except BlockingIOError:
@@ -98,13 +98,16 @@ class Fetcher(object):
                 self.web_crawler.links_to_visit.append(url)
         # log current link
         print(self.url)
-        if (len(self.web_crawler.links_to_visit) > 0 and 
-            len(self.web_crawler.links_visited) < self.web_crawler.max_requests):
+        if len(self.web_crawler.links_visited) < self.web_crawler.max_requests:
             left_requests = self.web_crawler.max_requests - len(self.web_crawler.links_visited)
-            for new_url in self.web_crawler.links_to_visit[:left_requests]:
-                fetcher = Fetcher(new_url, self.web_crawler)
-                gen = fetcher.connect()
-                GenExecutor(gen)
+            for i in range(0, left_requests):
+                try:
+                    new_url = self.web_crawler.links_to_visit.pop()
+                    fetcher = Fetcher(new_url, self.web_crawler)
+                    gen = fetcher.connect()
+                    Task(gen)
+                except IndexError:
+                    break
         else:
             self.web_crawler.stop_event_loop = True
 
@@ -120,7 +123,7 @@ class WebCrawler(object):
         # connect to the initial url, and start event loop
         fetcher = Fetcher(self.url, self)
         gen = fetcher.connect()
-        GenExecutor(gen)
+        Task(gen)
         while True:
             if self.stop_event_loop:
                 break

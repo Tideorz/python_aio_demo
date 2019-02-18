@@ -24,7 +24,7 @@ class Fetcher(object):
     def connect(self):
         # parse url
         parse_result = urlparse(self.url)
-        self.hostname = parse_result.netloc
+        self.hostname = parse_result.netloc.split(':')[0]
         try:
             self.sock.connect((self.hostname, 80))
         except BlockingIOError:
@@ -65,14 +65,18 @@ class Fetcher(object):
                 self.web_crawler.links_to_visit.append(url)
         # log current link
         print(self.url)
-        if (len(self.web_crawler.links_to_visit) > 0 and 
-            len(self.web_crawler.links_visited) < self.web_crawler.max_requests):
+        if len(self.web_crawler.links_visited) < self.web_crawler.max_requests:
             left_requests = self.web_crawler.max_requests - len(self.web_crawler.links_visited)
-            for new_url in self.web_crawler.links_to_visit[:left_requests]:
-                fetcher = Fetcher(new_url, self.web_crawler)
-                fetcher.connect()
+            for i in range(0, left_requests):
+                try:
+                    new_url = self.web_crawler.links_to_visit.pop()
+                    fetcher = Fetcher(new_url, self.web_crawler)
+                    fetcher.connect()
+                except IndexError:
+                    break
         else:
             self.web_crawler.stop_event_loop = True
+
 
 class WebCrawler(object):
     def __init__(self, url, max_requests):
