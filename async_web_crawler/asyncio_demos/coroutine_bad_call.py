@@ -14,8 +14,8 @@ def good_call_yield():
     yield from divide_yield(1, 0)
 
 def bad_call_by_non_coroutine():
-    import pdb; pdb.set_trace()
-    a = divide_yield(1, 0)
+    a = yield from divide_yield(1, 0)
+    yield a
 
 if __name__ == '__main__':
     #asyncio.run(good_call_async())
